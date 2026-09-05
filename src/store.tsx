@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { AppState, Exam, Settings } from "./types";
 import { sampleState } from "./data/sample";
+import { supabase, isSupabaseConfigured } from "./lib/supabase";
 
 const KEY = "libretto.v1";
 
@@ -38,6 +39,12 @@ interface AppCtx {
   clearAll: () => void;
   pushToast: (msg: string, opts?: Partial<Omit<Toast, "id" | "msg">>) => void;
   dismissToast: (id: string) => void;
+  // --- sync / auth ---
+  authReady: boolean;
+  userEmail: string | null;
+  syncActive: boolean;
+  login: (email: string, password: string) => Promise<string | null>;
+  logout: () => Promise<void>;
 }
 
 const Ctx = createContext<AppCtx | null>(null);
@@ -68,6 +75,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timers = useRef<Map<string, number>>(new Map());
 
+  // --- stato auth/sync ---
+  const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [syncActive, setSyncActive] = useState(false);
+  const userIdRef = useRef<string | null>(null);
+  const remoteReady = useRef(false);
+  const skipPush = useRef(false);
+  const setupFor = useRef<string | null>(null);
+  const stateRef = useRef(state);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  // Salva sempre in locale (così l'app funziona anche offline)
   useEffect(() => {
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
@@ -76,6 +98,116 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [state]);
 
+  /* ---------- SYNC: sessione, caricamento iniziale, realtime ---------- */
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    let channel: { remove: () => void } | null = null;
+
+    const setup = async (userId: string) => {
+      if (setupFor.current === userId) return;
+      setupFor.current = userId;
+      userIdRef.current = userId;
+
+      const { data, error } = await supabase
+        .from("libretto_state")
+        .select("state")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (!error) {
+        const remote = data?.state as AppState | null;
+        if (remote && Array.isArray(remote.exams) && remote.settings) {
+          // esiste un backup cloud: vince lui
+          skipPush.current = true;
+          setState(remote);
+        } else {
+          // primo accesso: carica i dati locali nel cloud
+          await supabase
+            .from("libretto_state")
+            .upsert({ user_id: userId, state: stateRef.current });
+        }
+      }
+
+      remoteReady.current = true;
+      setSyncActive(true);
+
+      channel = supabase
+        .channel(`libretto-${userId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "libretto_state",
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            const incoming = (payload.new as { state?: AppState })?.state;
+            if (!incoming || !Array.isArray(incoming.exams) || !incoming.settings) return;
+            if (JSON.stringify(incoming) === JSON.stringify(stateRef.current)) return;
+            skipPush.current = true;
+            setState(incoming);
+          },
+        )
+        .subscribe();
+    };
+
+    supabase.auth.getSession().then(({ data }) => {
+      const u = data.session?.user ?? null;
+      userIdRef.current = u?.id ?? null;
+      setUserEmail(u?.email ?? null);
+      if (u) void setup(u.id);
+      setAuthReady(true);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_ev, session) => {
+      const u = session?.user ?? null;
+      setUserEmail(u?.email ?? null);
+      if (u) {
+        void setup(u.id);
+      } else {
+        setupFor.current = null;
+        userIdRef.current = null;
+        remoteReady.current = false;
+        setSyncActive(false);
+      }
+    });
+
+    return () => {
+      sub.subscription.unsubscribe();
+      channel?.remove();
+    };
+  }, []);
+
+  /* ---------- SYNC: invio delle modifiche locali (con piccola attesa) ---------- */
+  useEffect(() => {
+    if (!isSupabaseConfigured || !remoteReady.current || !userIdRef.current) return;
+    if (skipPush.current) {
+      skipPush.current = false;
+      return;
+    }
+    const userId = userIdRef.current;
+    const t = window.setTimeout(() => {
+      void supabase.from("libretto_state").upsert({ user_id: userId, state });
+    }, 900);
+    return () => window.clearTimeout(t);
+  }, [state]);
+
+  /* ---------- Auth ---------- */
+  const login = useCallback(async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (!error) return null;
+    return error.message.includes("Invalid login credentials")
+      ? "Email o password sbagliati"
+      : error.message;
+  }, []);
+
+  const logout = useCallback(async () => {
+    await supabase.auth.signOut();
+  }, []);
+
+  /* ---------- Toasts ---------- */
   const dismissToast = useCallback((id: string) => {
     setToasts((t) => t.filter((x) => x.id !== id));
     const h = timers.current.get(id);
@@ -93,6 +225,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [dismissToast],
   );
 
+  /* ---------- Azioni sul libretto ---------- */
   const addExam = useCallback((e: Exam) => {
     setState((s) => ({ ...s, exams: [...s.exams, e] }));
   }, []);
@@ -159,6 +292,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         clearAll,
         pushToast,
         dismissToast,
+        authReady,
+        userEmail,
+        syncActive,
+        login,
+        logout,
       }}
     >
       {children}
