@@ -1,0 +1,26 @@
+{
+  "name": "Libretto · Carriera universitaria",
+  "short_name": "Libretto",
+  "description": "Gestisci esami, appelli, media ponderata e CFU del tuo percorso universitario.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a1d17",
+  "theme_color": "#0a1d17",
+  "lang": "it",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "https://image.qwenlm.ai/generated-images/82286c61-d3bf-45ad-a68a-da744594d164/_result.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
