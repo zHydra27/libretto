@@ -3,6 +3,7 @@ import confetti from "canvas-confetti";
 import { AppProvider, useApp } from "./store";
 import type { Exam, ViewId } from "./types";
 import { fmtGrade } from "./types";
+import { isSupabaseConfigured } from "./lib/supabase";
 import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./components/Dashboard";
 import { Libretto } from "./components/Libretto";
@@ -11,6 +12,7 @@ import { SettingsView } from "./components/SettingsView";
 import { ExamModal } from "./components/ExamModal";
 import { IncomingBackup } from "./components/IncomingBackup";
 import { Toasts } from "./components/Toasts";
+import { Login } from "./components/Login";
 import { Icon } from "./components/Icon";
 
 interface ModalState {
@@ -38,7 +40,6 @@ function Shell() {
     if (isNew) addExam(exam);
     else updateExam(exam.id, exam);
     setModal(null);
-
     if (exam.status === "passed" && !wasPassed) {
       celebrate();
       pushToast(`Superato! «${exam.name}» registrato: ${fmtGrade(exam)}/30`, {
@@ -62,8 +63,6 @@ function Shell() {
         open={drawer}
         onClose={() => setDrawer(false)}
       />
-
-      {/* barra superiore (mobile) */}
       <div className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-pine-800 bg-pine-950 px-4 text-paper md:hidden">
         <button
           onClick={() => setDrawer(true)}
@@ -86,7 +85,6 @@ function Shell() {
           <Icon name="plus" size={17} strokeWidth={2.5} />
         </button>
       </div>
-
       <main className="bg-dots min-h-screen md:pl-64">
         <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-9">
           <div key={view}>
@@ -111,7 +109,6 @@ function Shell() {
           </div>
         </div>
       </main>
-
       {modal && (
         <ExamModal
           key={`${modal.exam?.id ?? "new"}-${modal.preset ?? "std"}`}
@@ -121,17 +118,29 @@ function Shell() {
           onSubmit={handleSubmit}
         />
       )}
-
       <Toasts />
       <IncomingBackup />
     </div>
   );
 }
 
+function Gate() {
+  const { authReady, userEmail } = useApp();
+  if (!isSupabaseConfigured) return <Shell />;
+  if (!authReady)
+    return (
+      <div className="grid min-h-screen place-items-center bg-pine-950 text-paper">
+        <p className="text-sm opacity-70">Caricamento…</p>
+      </div>
+    );
+  if (!userEmail) return <Login />;
+  return <Shell />;
+}
+
 export default function App() {
   return (
     <AppProvider>
-      <Shell />
+      <Gate />
     </AppProvider>
   );
 }
