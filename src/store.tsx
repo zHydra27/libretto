@@ -112,16 +112,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .eq("user_id", userId)
         .maybeSingle();
 
-      if (!error) {
-        const remote = data?.state as AppState | null;
-        if (remote && Array.isArray(remote.exams) && remote.settings) {
+      if (!error && data) {
+        const remote = data.state as AppState | null;
+
+        // 🛡️ LOGICA BLINDATA: se il cloud ha esami, vincono loro.
+        if (remote && Array.isArray(remote.exams) && remote.exams.length > 0) {
+          const mergedState: AppState = {
+            exams: remote.exams,
+            settings: remote.settings || stateRef.current.settings,
+          };
           skipPush.current = true;
-          setState(remote);
+          setState(mergedState);
         } else {
-          await supabase
-            .from("libretto_state")
-            .upsert({ user_id: userId, state: stateRef.current });
+          // Cloud vuoto: carica i dati locali solo se ne hai davvero.
+          if (stateRef.current.exams.length > 0) {
+            await supabase
+              .from("libretto_state")
+              .upsert({ user_id: userId, state: stateRef.current });
+          }
         }
+      } else if (!data && !error) {
+        // Nessuna riga per questo utente: crea la prima.
+        await supabase
+          .from("libretto_state")
+          .upsert({ user_id: userId, state: stateRef.current });
       }
 
       remoteReady.current = true;
@@ -139,10 +153,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           },
           (payload) => {
             const incoming = (payload.new as { state?: AppState })?.state;
-            if (!incoming || !Array.isArray(incoming.exams) || !incoming.settings) return;
+            if (!incoming || !Array.isArray(incoming.exams)) return;
             if (JSON.stringify(incoming) === JSON.stringify(stateRef.current)) return;
             skipPush.current = true;
-            setState(incoming);
+            setState({
+              exams: incoming.exams,
+              settings: incoming.settings || stateRef.current.settings,
+            });
           },
         )
         .subscribe();
