@@ -105,8 +105,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     console.log("✅ [DEBUG] Supabase risulta configurato");
 
-    let channel: { remove: () => void } | null = null;
-
+      let channel: any = null;
     const setup = async (userId: string) => {
       console.log("🔍 [DEBUG 2] Funzione setup avviata per user:", userId);
       if (setupFor.current === userId) {
@@ -214,7 +213,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     return () => {
       sub.subscription.unsubscribe();
-      channel?.remove();
+              if (channel) supabase.removeChannel(channel);
     };
   }, []);
 
