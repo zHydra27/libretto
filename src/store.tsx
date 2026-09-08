@@ -101,7 +101,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     let channel: { remove: () => void } | null = null;
 
-    const setup = async (userId: string) => {
+        const setup = async (userId: string) => {
       if (setupFor.current === userId) return;
       setupFor.current = userId;
       userIdRef.current = userId;
@@ -112,7 +112,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .eq("user_id", userId)
         .maybeSingle();
 
-      if (!error && data) {
+      // 🚨 NUOVO: Se c'è un errore, stampalo nella console e fermati!
+      if (error) {
+        console.error("❌ ERRORE SUPABASE (LETTURA):", error.message, error.details);
+        return; 
+      }
+
+      if (data) {
         const remote = data.state as AppState | null;
 
         // 🛡️ LOGICA BLINDATA: se il cloud ha esami, vincono loro.
@@ -126,16 +132,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } else {
           // Cloud vuoto: carica i dati locali solo se ne hai davvero.
           if (stateRef.current.exams.length > 0) {
-            await supabase
+            const { error: upsertError } = await supabase
               .from("libretto_state")
               .upsert({ user_id: userId, state: stateRef.current });
+              
+            if (upsertError) {
+              console.error("❌ ERRORE SUPABASE (SCRITTURA INIZIALE):", upsertError.message);
+            }
           }
         }
-      } else if (!data && !error) {
+      } else {
         // Nessuna riga per questo utente: crea la prima.
-        await supabase
+        const { error: upsertError } = await supabase
           .from("libretto_state")
           .upsert({ user_id: userId, state: stateRef.current });
+          
+        if (upsertError) {
+          console.error("❌ ERRORE SUPABASE (CREAZIONE RIGA):", upsertError.message);
+        }
       }
 
       remoteReady.current = true;
@@ -164,7 +178,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         )
         .subscribe();
     };
-
     supabase.auth.getSession().then(({ data }) => {
       const u = data.session?.user ?? null;
       userIdRef.current = u?.id ?? null;
