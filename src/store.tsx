@@ -39,7 +39,6 @@ interface AppCtx {
   clearAll: () => void;
   pushToast: (msg: string, opts?: Partial<Omit<Toast, "id" | "msg">>) => void;
   dismissToast: (id: string) => void;
-  // --- sync / auth ---
   authReady: boolean;
   userEmail: string | null;
   syncActive: boolean;
@@ -75,7 +74,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timers = useRef<Map<string, number>>(new Map());
 
-  // --- stato auth/sync ---
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [syncActive, setSyncActive] = useState(false);
@@ -89,7 +87,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     stateRef.current = state;
   }, [state]);
 
-  // Salva sempre in locale (così l'app funziona anche offline)
   useEffect(() => {
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
@@ -118,11 +115,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!error) {
         const remote = data?.state as AppState | null;
         if (remote && Array.isArray(remote.exams) && remote.settings) {
-          // esiste un backup cloud: vince lui
           skipPush.current = true;
           setState(remote);
         } else {
-          // primo accesso: carica i dati locali nel cloud
           await supabase
             .from("libretto_state")
             .upsert({ user_id: userId, state: stateRef.current });
@@ -180,7 +175,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  /* ---------- SYNC: invio delle modifiche locali (con piccola attesa) ---------- */
+  /* ---------- SYNC: invio delle modifiche locali ---------- */
   useEffect(() => {
     if (!isSupabaseConfigured || !remoteReady.current || !userIdRef.current) return;
     if (skipPush.current) {
