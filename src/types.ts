@@ -1,6 +1,5 @@
 export type ExamStatus = "todo" | "study" | "booked" | "passed" | "failed";
-
-export type ViewId = "dashboard" | "libretto" | "appelli" | "settings";
+export type ViewId = "dashboard" | "libretto" | "appelli" | "settings" | "plan";
 
 export interface Exam {
   id: string;
@@ -11,7 +10,7 @@ export interface Exam {
   status: ExamStatus;
   /** ISO date (yyyy-mm-dd) — data dell'appello */
   date?: string;
-  /** 18–30, presente se superato */
+  /* 18–30, presente se superato */
   grade?: number;
   lode?: boolean;
   notes?: string;
@@ -24,7 +23,7 @@ export interface Settings {
   targetCfu: number;
   /** punti bonus di partenza per il voto di laurea */
   bonus: number;
-  /** obiettivo di voto di laurea (66–110) */
+  /* obiettivo di voto di laurea (66–110) */
   targetGrade: number;
 }
 
