@@ -96,115 +96,127 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state]);
 
   /* ---------- SYNC: sessione, caricamento iniziale, realtime ---------- */
-  useEffect(() => {
-    if (!isSupabaseConfigured) return;
-
-    let channel: { remove: () => void } | null = null;
-
-        const setup = async (userId: string) => {
-      if (setupFor.current === userId) return;
-      setupFor.current = userId;
-      userIdRef.current = userId;
-
-      const { data, error } = await supabase
-        .from("libretto_state")
-        .select("state")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      // 🚨 NUOVO: Se c'è un errore, stampalo nella console e fermati!
-      if (error) {
-        console.error("❌ ERRORE SUPABASE (LETTURA):", error.message, error.details);
-        return; 
+    useEffect(() => {
+      console.log("🔍 [DEBUG 1] useEffect sincronizzazione avviato");
+      
+      if (!isSupabaseConfigured) {
+        console.error("⛔ [DEBUG] Supabase NON configurato! Controllo fallito.");
+        return;
       }
+      console.log("✅ [DEBUG] Supabase risulta configurato");
 
-      if (data) {
-        const remote = data.state as AppState | null;
+      let channel: { remove: () => void } | null = null;
 
-        // 🛡️ LOGICA BLINDATA: se il cloud ha esami, vincono loro.
-        if (remote && Array.isArray(remote.exams) && remote.exams.length > 0) {
-          const mergedState: AppState = {
-            exams: remote.exams,
-            settings: remote.settings || stateRef.current.settings,
-          };
-          skipPush.current = true;
-          setState(mergedState);
-        } else {
-          // Cloud vuoto: carica i dati locali solo se ne hai davvero.
-          if (stateRef.current.exams.length > 0) {
-            const { error: upsertError } = await supabase
-              .from("libretto_state")
-              .upsert({ user_id: userId, state: stateRef.current });
-              
-            if (upsertError) {
-              console.error("❌ ERRORE SUPABASE (SCRITTURA INIZIALE):", upsertError.message);
+      const setup = async (userId: string) => {
+        console.log("🔍 [DEBUG 2] Funzione setup avviata per user:", userId);
+        if (setupFor.current === userId) {
+            console.log("⛔ [DEBUG] setup già eseguito per questo user, esco.");
+            return;
+        }
+        setupFor.current = userId;
+        userIdRef.current = userId;
+
+        console.log("🔍 [DEBUG 3] Tentativo di lettura da Supabase...");
+        const { data, error } = await supabase
+          .from("libretto_state")
+          .select("state")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (error) {
+          console.error("❌ ERRORE SUPABASE (LETTURA):", error.message, error.details);
+          return; 
+        }
+        console.log("✅ [DEBUG 4] Lettura riuscita. Dati:", data);
+
+        if (data) {
+          const remote = data.state as AppState | null;
+          if (remote && Array.isArray(remote.exams) && remote.exams.length > 0) {
+            console.log("🔍 [DEBUG 5] Trovati dati remoti, applico merge.");
+            const mergedState: AppState = {
+              exams: remote.exams,
+              settings: remote.settings || stateRef.current.settings,
+            };
+            skipPush.current = true;
+            setState(mergedState);
+          } else {
+            if (stateRef.current.exams.length > 0) {
+              console.log("🔍 [DEBUG 6] Cloud vuoto, ma ho dati locali. Invio upsert...");
+              const { error: upsertError } = await supabase
+                .from("libretto_state")
+                .upsert({ user_id: userId, state: stateRef.current });
+              if (upsertError) console.error("❌ ERRORE SUPABASE (SCRITTURA INIZIALE):", upsertError.message);
+              else console.log("✅ [DEBUG 7] Upsert iniziale riuscito!");
             }
           }
+        } else {
+          console.log("🔍 [DEBUG 8] Nessuna riga trovata, creo la prima...");
+          const { error: upsertError } = await supabase
+            .from("libretto_state")
+            .upsert({ user_id: userId, state: stateRef.current });
+          if (upsertError) console.error("❌ ERRORE SUPABASE (CREAZIONE RIGA):", upsertError.message);
+          else console.log("✅ [DEBUG 9] Creazione riga riuscita!");
         }
-      } else {
-        // Nessuna riga per questo utente: crea la prima.
-        const { error: upsertError } = await supabase
-          .from("libretto_state")
-          .upsert({ user_id: userId, state: stateRef.current });
-          
-        if (upsertError) {
-          console.error("❌ ERRORE SUPABASE (CREAZIONE RIGA):", upsertError.message);
+
+        remoteReady.current = true;
+        setSyncActive(true);
+        console.log("✅ [DEBUG 10] Sincronizzazione pronta e attiva.");
+
+        channel = supabase
+          .channel(`libretto-${userId}`)
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "libretto_state", filter: `user_id=eq.${userId}` },
+            (payload) => {
+              console.log("🔍 [DEBUG REALTIME] Modifica rilevata dal cloud:", payload);
+              const incoming = (payload.new as { state?: AppState })?.state;
+              if (!incoming || !Array.isArray(incoming.exams)) return;
+              if (JSON.stringify(incoming) === JSON.stringify(stateRef.current)) return;
+              skipPush.current = true;
+              setState({
+                exams: incoming.exams,
+                settings: incoming.settings || stateRef.current.settings,
+              });
+            }
+          )
+          .subscribe();
+      };
+
+      console.log("🔍 [DEBUG 11] Controllo sessione Supabase...");
+      supabase.auth.getSession().then(({ data }) => {
+        const u = data.session?.user ?? null;
+        console.log("🔍 [DEBUG 12] Risultato getSession:", u ? `Utente: ${u.email} (ID: ${u.id})` : "NESSUN UTENTE");
+        
+        userIdRef.current = u?.id ?? null;
+        setUserEmail(u?.email ?? null);
+        
+        if (u) {
+          void setup(u.id);
+        } else {
+          console.log("⛔ [DEBUG] Nessun utente loggato, setup NON chiamato.");
         }
-      }
+        setAuthReady(true);
+      });
 
-      remoteReady.current = true;
-      setSyncActive(true);
+      const { data: sub } = supabase.auth.onAuthStateChange((_ev, session) => {
+        const u = session?.user ?? null;
+        console.log("🔍 [DEBUG AUTH CHANGE] Stato auth cambiato:", u ? `Utente: ${u.email}` : "Logout");
+        setUserEmail(u?.email ?? null);
+        if (u) {
+          void setup(u.id);
+        } else {
+          setupFor.current = null;
+          userIdRef.current = null;
+          remoteReady.current = false;
+          setSyncActive(false);
+        }
+      });
 
-      channel = supabase
-        .channel(`libretto-${userId}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "libretto_state",
-            filter: `user_id=eq.${userId}`,
-          },
-          (payload) => {
-            const incoming = (payload.new as { state?: AppState })?.state;
-            if (!incoming || !Array.isArray(incoming.exams)) return;
-            if (JSON.stringify(incoming) === JSON.stringify(stateRef.current)) return;
-            skipPush.current = true;
-            setState({
-              exams: incoming.exams,
-              settings: incoming.settings || stateRef.current.settings,
-            });
-          },
-        )
-        .subscribe();
-    };
-    supabase.auth.getSession().then(({ data }) => {
-      const u = data.session?.user ?? null;
-      userIdRef.current = u?.id ?? null;
-      setUserEmail(u?.email ?? null);
-      if (u) void setup(u.id);
-      setAuthReady(true);
-    });
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_ev, session) => {
-      const u = session?.user ?? null;
-      setUserEmail(u?.email ?? null);
-      if (u) {
-        void setup(u.id);
-      } else {
-        setupFor.current = null;
-        userIdRef.current = null;
-        remoteReady.current = false;
-        setSyncActive(false);
-      }
-    });
-
-    return () => {
-      sub.subscription.unsubscribe();
-      channel?.remove();
-    };
-  }, []);
-
+      return () => {
+        sub.subscription.unsubscribe();
+        channel?.remove();
+      };
+    }, []);
   /* ---------- SYNC: invio delle modifiche locali ---------- */
   useEffect(() => {
     if (!isSupabaseConfigured || !remoteReady.current || !userIdRef.current) return;
