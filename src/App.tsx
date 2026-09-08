@@ -13,6 +13,7 @@ import { ExamModal } from "./components/ExamModal";
 import { IncomingBackup } from "./components/IncomingBackup";
 import { Toasts } from "./components/Toasts";
 import { Login } from "./components/Login";
+import { Plan } from "./components/Plan";
 import { Icon } from "./components/Icon";
 
 interface ModalState {
@@ -63,6 +64,7 @@ function Shell() {
         open={drawer}
         onClose={() => setDrawer(false)}
       />
+      {/* barra superiore (mobile) */}
       <div className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-pine-800 bg-pine-950 px-4 text-paper md:hidden">
         <button
           onClick={() => setDrawer(true)}
@@ -106,9 +108,19 @@ function Shell() {
               />
             )}
             {view === "settings" && <SettingsView />}
+            {view === "plan" && <Plan onNavigate={setView} />}
           </div>
         </div>
       </main>
+      {/* pulsante flottante per aprire il Piano di studi */}
+      {view !== "plan" && (
+        <button
+          onClick={() => setView("plan")}
+          className="fixed bottom-6 right-6 z-40 rounded-full bg-amber-500 px-5 py-3 font-display text-sm font-bold text-pine-950 shadow-xl transition hover:bg-amber-400 active:scale-95"
+        >
+          Piano di studi
+        </button>
+      )}
       {modal && (
         <ExamModal
           key={`${modal.exam?.id ?? "new"}-${modal.preset ?? "std"}`}
